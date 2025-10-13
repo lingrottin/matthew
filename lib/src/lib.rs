@@ -1,11 +1,52 @@
+//! Matthew is a library that counts various code elements created by Rust developers. It provides
+//! detailed statistics about function definitions, structs, enums, control flow structures,
+//! expressions, and other syntactic elements in Rust source code.
+//!
+//! # Usage
+//! ```
+//! use matthew::{count_file, count_str, Counts};
+//! use std::path::PathBuf;
+//!
+//! // Count code elements from a file
+//! let counts = count_file(PathBuf::from("src/lib.rs")).unwrap();
+//!
+//! // Count code elements from a string
+//! let source_code = "fn main() { println!(\"Hello, world!\"); }".to_string();
+//! let counts = count_str(source_code).unwrap();
+//!
+//! // Access count results
+//! println!("Number of function definitions: {}", counts.def_fn);
+//! println!("Number of macro invocations: {}", counts.call_macro);
+//! ```
+//!
+//! # Features
+//! The library supports the following optional features:
+//! - `syn` *(enabled by default)*: Provides code parsing functionality using [syn](https://crates.io/crates/syn)
+//! - `serde`: Enables serialization and deserialization support for the `Counts` struct
+
 use std::path::PathBuf;
 
 pub mod types;
 
+pub use anyhow::Result;
 pub use types::Counts;
 
+/// Counts various code elements from a Rust source file.
+///
+/// This function reads the file at the specified path, parses it using the syn crate (if the
+/// `syn` feature is enabled), and counts various code elements in the file.
+///
+/// # Arguments
+/// * `path` - The path to the Rust source file to analyze
+///
+/// # Returns
+/// A `Result` containing the `Counts` struct with the statistics of the code elements,
+/// or an error if the file cannot be read or parsed.
+///
+/// # Panics
+/// This function panics if no parser feature is enabled. The `syn` feature is enabled by default.
 #[expect(unreachable_code)]
-pub fn count_file(path: PathBuf) -> anyhow::Result<Counts> {
+pub fn count_file(path: PathBuf) -> Result<Counts> {
     #[cfg(feature = "syn")]
     {
         use crate::types::SynCounter;
@@ -21,8 +62,22 @@ pub fn count_file(path: PathBuf) -> anyhow::Result<Counts> {
     panic!("Please enable at least one parser feature!");
 }
 
+/// Counts various code elements from a Rust source code string.
+///
+/// This function parses the provided string using the syn crate (if the `syn` feature is enabled),
+/// and counts various code elements in the code.
+///
+/// # Arguments
+/// * `content` - The Rust source code string to analyze
+///
+/// # Returns
+/// A `Result` containing the `Counts` struct with the statistics of the code elements,
+/// or an error if the code cannot be parsed.
+///
+/// # Panics
+/// This function panics if no parser feature is enabled. The `syn` feature is enabled by default.
 #[expect(unreachable_code)]
-pub fn count_str(content: String) -> anyhow::Result<Counts> {
+pub fn count_str(content: String) -> Result<Counts> {
     #[cfg(feature = "syn")]
     {
         use crate::types::SynCounter;
@@ -89,7 +144,7 @@ mod tests {
         "#,
         );
         assert_eq!(c.def_macro_rules, 1);
-        assert!(c.call_macro >= 2, "macro_rules and println!");
+        assert_eq!(c.call_macro, 2);
     }
 
     #[test]
@@ -136,5 +191,11 @@ mod tests {
         assert_eq!(c.expr_await, 1);
         assert_eq!(c.expr_try, 1);
         assert_eq!(c.expr_return, 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn not_rust_code() {
+        let _ = counts("not a valid rust code,,,....");
     }
 }

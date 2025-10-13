@@ -2,9 +2,14 @@ use std::ops::Add;
 
 /// A comprehensive collection of code element counts in a file or crate.
 ///
-/// This struct is designed for analyzing Rust source code statistics.
-/// It categorizes definitions, control structures, expressions, and other
-/// syntactic elements that might reflect a developer’s style or project complexity.
+/// This struct stores statistics about various code elements found in Rust source code.
+/// It categorizes definitions, control structures, expressions, and other syntactic elements
+/// that might reflect a developer's style or project complexity.
+///
+/// The struct implements the `Add` trait, allowing you to combine counts from multiple sources.
+/// It also supports `PartialEq` for comparing count results.
+///
+/// When the `serde` feature is enabled, it also implements `Serialize` and `Deserialize` traits.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Default, Clone)]
 pub struct Counts {
@@ -178,7 +183,18 @@ pub struct SynCounter {
     counts: Counts,
 }
 
+/// A visitor that counts various code elements in a Rust AST.
+///
+/// This struct is used internally by the library to traverse a Rust abstract syntax tree (AST)
+/// and count various code elements. It implements the `syn::visit::Visit` trait to visit
+/// different nodes in the AST and update the counts accordingly.
+///
+/// This struct is only available when the `syn` feature is enabled.
 impl SynCounter {
+    /// Extracts the collected counts from the counter.
+    ///
+    /// # Returns
+    /// The `Counts` struct containing the statistics of the code elements counted during the visit.
     pub fn into_counts(self) -> Counts {
         self.counts
     }
@@ -186,28 +202,34 @@ impl SynCounter {
 
 #[cfg(feature = "syn")]
 impl<'ast> syn::visit::Visit<'ast> for SynCounter {
+    fn visit_arm(&mut self, i: &'ast syn::Arm) {
+        self.counts.block_match_arms += 1;
+        syn::visit::visit_arm(self, i);
+    }
+
+    fn visit_expr_await(&mut self, i: &'ast syn::ExprAwait) {
+        self.counts.expr_await += 1;
+        syn::visit::visit_expr_await(self, i);
+    }
+
+    fn visit_expr_binary(&mut self, i: &'ast syn::ExprBinary) {
+        self.counts.expr_binop += 1;
+        syn::visit::visit_expr_binary(self, i);
+    }
+
     fn visit_expr_call(&mut self, i: &'ast syn::ExprCall) {
         self.counts.call_fn += 1;
         syn::visit::visit_expr_call(self, i);
     }
 
-    fn visit_expr_method_call(&mut self, i: &'ast syn::ExprMethodCall) {
-        self.counts.call_method += 1;
-        syn::visit::visit_expr_method_call(self, i);
+    fn visit_expr_closure(&mut self, i: &'ast syn::ExprClosure) {
+        self.counts.expr_closure += 1;
+        syn::visit::visit_expr_closure(self, i);
     }
 
-    fn visit_expr_macro(&mut self, i: &'ast syn::ExprMacro) {
-        self.counts.call_macro += 1;
-        syn::visit::visit_expr_macro(self, i);
-    }
-
-    fn visit_item_macro(&mut self, i: &'ast syn::ItemMacro) {
-        if i.mac.path.is_ident("macro_rules") {
-            self.counts.def_macro_rules += 1;
-        } else {
-            self.counts.call_macro += 1;
-        }
-        syn::visit::visit_item_macro(self, i);
+    fn visit_expr_for_loop(&mut self, i: &'ast syn::ExprForLoop) {
+        self.counts.block_for += 1;
+        syn::visit::visit_expr_for_loop(self, i);
     }
 
     fn visit_expr_if(&mut self, i: &'ast syn::ExprIf) {
@@ -218,29 +240,39 @@ impl<'ast> syn::visit::Visit<'ast> for SynCounter {
         syn::visit::visit_expr_if(self, i);
     }
 
+    fn visit_expr_loop(&mut self, i: &'ast syn::ExprLoop) {
+        self.counts.block_loop += 1;
+        syn::visit::visit_expr_loop(self, i);
+    }
+
+    fn visit_expr_macro(&mut self, i: &'ast syn::ExprMacro) {
+        self.counts.call_macro += 1;
+        syn::visit::visit_expr_macro(self, i);
+    }
+
     fn visit_expr_match(&mut self, i: &'ast syn::ExprMatch) {
         self.counts.block_match += 1;
         syn::visit::visit_expr_match(self, i);
     }
 
-    fn visit_arm(&mut self, i: &'ast syn::Arm) {
-        self.counts.block_match_arms += 1;
-        syn::visit::visit_arm(self, i);
+    fn visit_expr_method_call(&mut self, i: &'ast syn::ExprMethodCall) {
+        self.counts.call_method += 1;
+        syn::visit::visit_expr_method_call(self, i);
     }
 
-    fn visit_expr_for_loop(&mut self, i: &'ast syn::ExprForLoop) {
-        self.counts.block_for += 1;
-        syn::visit::visit_expr_for_loop(self, i);
+    fn visit_expr_return(&mut self, i: &'ast syn::ExprReturn) {
+        self.counts.expr_return += 1;
+        syn::visit::visit_expr_return(self, i);
     }
 
-    fn visit_expr_while(&mut self, i: &'ast syn::ExprWhile) {
-        self.counts.block_while += 1;
-        syn::visit::visit_expr_while(self, i);
+    fn visit_expr_try(&mut self, i: &'ast syn::ExprTry) {
+        self.counts.expr_try += 1;
+        syn::visit::visit_expr_try(self, i);
     }
 
-    fn visit_expr_loop(&mut self, i: &'ast syn::ExprLoop) {
-        self.counts.block_loop += 1;
-        syn::visit::visit_expr_loop(self, i);
+    fn visit_expr_unary(&mut self, i: &'ast syn::ExprUnary) {
+        self.counts.expr_unop += 1;
+        syn::visit::visit_expr_unary(self, i);
     }
 
     fn visit_expr_unsafe(&mut self, i: &'ast syn::ExprUnsafe) {
@@ -248,26 +280,14 @@ impl<'ast> syn::visit::Visit<'ast> for SynCounter {
         syn::visit::visit_expr_unsafe(self, i);
     }
 
-    fn visit_pat_ident(&mut self, i: &'ast syn::PatIdent) {
-        if i.mutability.is_some() {
-            self.counts.def_var_mut += 1;
-        } else {
-            self.counts.def_var += 1;
-        }
-        // 委托给默认访问器，以便继续遍历 any sub-patterns (虽然 PatIdent 通常是叶子节点，但保持习惯)
-        syn::visit::visit_pat_ident(self, i);
+    fn visit_expr_while(&mut self, i: &'ast syn::ExprWhile) {
+        self.counts.block_while += 1;
+        syn::visit::visit_expr_while(self, i);
     }
 
-    fn visit_item_fn(&mut self, i: &'ast syn::ItemFn) {
-        if i.attrs.iter().any(|attr| attr.path().is_ident("test")) {
-            self.counts.def_test_fn += 1;
-        }
-        if i.sig.asyncness.is_some() {
-            self.counts.def_async_fn += 1;
-        } else {
-            self.counts.def_fn += 1;
-        }
-        syn::visit::visit_item_fn(self, i);
+    fn visit_expr_yield(&mut self, i: &'ast syn::ExprYield) {
+        self.counts.expr_yield += 1;
+        syn::visit::visit_expr_yield(self, i);
     }
 
     fn visit_impl_item_fn(&mut self, i: &'ast syn::ImplItemFn) {
@@ -282,14 +302,9 @@ impl<'ast> syn::visit::Visit<'ast> for SynCounter {
         syn::visit::visit_impl_item_fn(self, i);
     }
 
-    fn visit_item_trait(&mut self, i: &'ast syn::ItemTrait) {
-        self.counts.def_trait += 1;
-        syn::visit::visit_item_trait(self, i);
-    }
-
-    fn visit_item_type(&mut self, i: &'ast syn::ItemType) {
-        self.counts.def_type += 1;
-        syn::visit::visit_item_type(self, i);
+    fn visit_item_const(&mut self, i: &'ast syn::ItemConst) {
+        self.counts.def_const += 1;
+        syn::visit::visit_item_const(self, i);
     }
 
     fn visit_item_enum(&mut self, i: &'ast syn::ItemEnum) {
@@ -297,29 +312,21 @@ impl<'ast> syn::visit::Visit<'ast> for SynCounter {
         syn::visit::visit_item_enum(self, i);
     }
 
-    fn visit_item_struct(&mut self, i: &'ast syn::ItemStruct) {
-        self.counts.def_struct += 1;
-        syn::visit::visit_item_struct(self, i);
+    fn visit_item_extern_crate(&mut self, i: &'ast syn::ItemExternCrate) {
+        self.counts.extern_crate += 1;
+        syn::visit::visit_item_extern_crate(self, i);
     }
 
-    fn visit_item_union(&mut self, i: &'ast syn::ItemUnion) {
-        self.counts.def_union += 1;
-        syn::visit::visit_item_union(self, i);
-    }
-
-    fn visit_item_mod(&mut self, i: &'ast syn::ItemMod) {
-        self.counts.def_mod += 1;
-        syn::visit::visit_item_mod(self, i);
-    }
-
-    fn visit_item_const(&mut self, i: &'ast syn::ItemConst) {
-        self.counts.def_const += 1;
-        syn::visit::visit_item_const(self, i);
-    }
-
-    fn visit_item_static(&mut self, i: &'ast syn::ItemStatic) {
-        self.counts.def_static += 1;
-        syn::visit::visit_item_static(self, i);
+    fn visit_item_fn(&mut self, i: &'ast syn::ItemFn) {
+        if i.attrs.iter().any(|attr| attr.path().is_ident("test")) {
+            self.counts.def_test_fn += 1;
+        }
+        if i.sig.asyncness.is_some() {
+            self.counts.def_async_fn += 1;
+        } else {
+            self.counts.def_fn += 1;
+        }
+        syn::visit::visit_item_fn(self, i);
     }
 
     fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
@@ -331,39 +338,43 @@ impl<'ast> syn::visit::Visit<'ast> for SynCounter {
         syn::visit::visit_item_impl(self, i);
     }
 
-    fn visit_expr_closure(&mut self, i: &'ast syn::ExprClosure) {
-        self.counts.expr_closure += 1;
-        syn::visit::visit_expr_closure(self, i);
+    fn visit_item_macro(&mut self, i: &'ast syn::ItemMacro) {
+        if i.mac.path.is_ident("macro_rules") {
+            self.counts.def_macro_rules += 1;
+        } else {
+            self.counts.call_macro += 1;
+        }
+        syn::visit::visit_item_macro(self, i);
     }
 
-    fn visit_expr_await(&mut self, i: &'ast syn::ExprAwait) {
-        self.counts.expr_await += 1;
-        syn::visit::visit_expr_await(self, i);
+    fn visit_item_mod(&mut self, i: &'ast syn::ItemMod) {
+        self.counts.def_mod += 1;
+        syn::visit::visit_item_mod(self, i);
     }
 
-    fn visit_expr_try(&mut self, i: &'ast syn::ExprTry) {
-        self.counts.expr_try += 1;
-        syn::visit::visit_expr_try(self, i);
+    fn visit_item_static(&mut self, i: &'ast syn::ItemStatic) {
+        self.counts.def_static += 1;
+        syn::visit::visit_item_static(self, i);
     }
 
-    fn visit_expr_return(&mut self, i: &'ast syn::ExprReturn) {
-        self.counts.expr_return += 1;
-        syn::visit::visit_expr_return(self, i);
+    fn visit_item_struct(&mut self, i: &'ast syn::ItemStruct) {
+        self.counts.def_struct += 1;
+        syn::visit::visit_item_struct(self, i);
     }
 
-    fn visit_expr_yield(&mut self, i: &'ast syn::ExprYield) {
-        self.counts.expr_yield += 1;
-        syn::visit::visit_expr_yield(self, i);
+    fn visit_item_trait(&mut self, i: &'ast syn::ItemTrait) {
+        self.counts.def_trait += 1;
+        syn::visit::visit_item_trait(self, i);
     }
 
-    fn visit_expr_binary(&mut self, i: &'ast syn::ExprBinary) {
-        self.counts.expr_binop += 1;
-        syn::visit::visit_expr_binary(self, i);
+    fn visit_item_type(&mut self, i: &'ast syn::ItemType) {
+        self.counts.def_type += 1;
+        syn::visit::visit_item_type(self, i);
     }
 
-    fn visit_expr_unary(&mut self, i: &'ast syn::ExprUnary) {
-        self.counts.expr_unop += 1;
-        syn::visit::visit_expr_unary(self, i);
+    fn visit_item_union(&mut self, i: &'ast syn::ItemUnion) {
+        self.counts.def_union += 1;
+        syn::visit::visit_item_union(self, i);
     }
 
     fn visit_item_use(&mut self, i: &'ast syn::ItemUse) {
@@ -371,9 +382,13 @@ impl<'ast> syn::visit::Visit<'ast> for SynCounter {
         syn::visit::visit_item_use(self, i);
     }
 
-    fn visit_item_extern_crate(&mut self, i: &'ast syn::ItemExternCrate) {
-        self.counts.extern_crate += 1;
-        syn::visit::visit_item_extern_crate(self, i);
+    fn visit_pat_ident(&mut self, i: &'ast syn::PatIdent) {
+        if i.mutability.is_some() {
+            self.counts.def_var_mut += 1;
+        } else {
+            self.counts.def_var += 1;
+        }
+        syn::visit::visit_pat_ident(self, i);
     }
 
     fn visit_trait_item(&mut self, i: &'ast syn::TraitItem) {
