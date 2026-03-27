@@ -37,7 +37,7 @@ pub async fn count(
         .await?;
 
     info!(size = repo_info.size, "fetched repo size");
-    if repo_info.size > 50 * 1024 * 1024 {
+    if repo_info.size > 50 * 1024 {
         error!(size = repo_info.size, "repository too large");
         return Err(anyhow!("Repository too large"));
     }

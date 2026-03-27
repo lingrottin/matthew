@@ -56,7 +56,6 @@ async fn handle_request(
     let state_clone = state.clone();
     tokio::spawn(async move {
         let state = state_clone;
-        state.sem.acquire().await.unwrap().forget();
         let repo = repo;
         let closure = async || -> anyhow::Result<types::ItemData> {
             let _permit = state.sem.acquire().await?;
