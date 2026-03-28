@@ -1,4 +1,6 @@
 use axum::{Json, Router, extract::State, http::HeaderMap, routing::post};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::Semaphore;
 
@@ -19,11 +21,17 @@ async fn main() {
     } else {
         panic!("token not found in Config.toml");
     };
+    let callback_secret = if let Some(s) = config.get("callback_secret").and_then(|v| v.as_str()) {
+        s.to_string()
+    } else {
+        panic!("callback_secret not found in Config.toml");
+    };
     let state = AppState {
         sem: Arc::new(Semaphore::new(4)), // limit to 4 concurrent tasks
         data_dir: PathBuf::from("./data"),
         client: Arc::new(reqwest::Client::new()),
         token,
+        callback_secret,
     };
     let app: Router = Router::new()
         .route("/api/count", post(handle_request))
@@ -41,6 +49,7 @@ pub struct AppState {
     data_dir: PathBuf,
     client: Arc<reqwest::Client>,
     token: String,
+    callback_secret: String,
 }
 
 async fn handle_request(
@@ -56,7 +65,6 @@ async fn handle_request(
     let state_clone = state.clone();
     tokio::spawn(async move {
         let state = state_clone;
-        state.sem.acquire().await.unwrap().forget();
         let repo = repo;
         let closure = async || -> anyhow::Result<types::ItemData> {
             let _permit = state.sem.acquire().await?;
@@ -86,14 +94,26 @@ async fn handle_request(
                 error: Some(e.to_string()),
             },
         };
+        let body_json = serde_json::to_string(&callback).unwrap();
+        let signature = hmac_sign(&state.callback_secret, &body_json);
         state
             .client
             .post(&repo.callback)
             .header("User-Agent", "Matthew")
-            .json(&callback)
+            .header("Content-Type", "application/json")
+            .header("X-Signature-256", format!("sha256={}", signature))
+            .body(body_json)
             .send()
             .await
             .unwrap();
     });
     Ok(Output { success: true })
+}
+
+fn hmac_sign(secret: &str, body: &str) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
+        .expect("HMAC can take key of any size");
+    mac.update(body.as_bytes());
+    let result = mac.finalize();
+    hex::encode(result.into_bytes())
 }
