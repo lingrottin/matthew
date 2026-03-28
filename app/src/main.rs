@@ -1,6 +1,7 @@
 use axum::{Json, Router, extract::State, http::HeaderMap, routing::post};
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::Semaphore;
+use tracing::{error, info, warn};
 
 use crate::types::{Output, Repo};
 mod service;
@@ -8,6 +9,8 @@ mod types;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     let config_toml = std::fs::read_to_string("Config.toml").expect("Failed to read Config.toml");
     let config: toml::Value = toml::from_str(&config_toml).expect("Failed to parse Config.toml");
     let mut port: i64 = 3000;
@@ -29,6 +32,7 @@ async fn main() {
         .route("/api/count", post(handle_request))
         .with_state(state);
 
+    info!(port = port, "starting server");
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port))
         .await
         .unwrap();
@@ -48,15 +52,18 @@ async fn handle_request(
     headers: HeaderMap,
     Json(repo): Json<types::InvokeApiInput>,
 ) -> types::Result<types::Output> {
+    info!(owner = %repo.user, repo = %repo.repo, callback = %repo.callback, "received count request");
     if headers.get("Authorization").and_then(|v| v.to_str().ok())
         != Some(&format!("Bearer {}", state.token))
     {
+        warn!(owner = %repo.user, repo = %repo.repo, "authorization failed");
         return Ok(types::Output { success: false });
     }
     let state_clone = state.clone();
     tokio::spawn(async move {
         let state = state_clone;
         let repo = repo;
+        info!(owner = %repo.user, repo = %repo.repo, "background count task started");
         let closure = async || -> anyhow::Result<types::ItemData> {
             let _permit = state.sem.acquire().await?;
             let repo = repo.clone();
@@ -71,28 +78,41 @@ async fn handle_request(
             .await
         };
         let res = closure().await;
+        let repo_name = repo.repo.clone();
         let callback = match res {
-            Ok(data) => types::ItemCallback {
-                repo: repo.repo,
-                status: types::ItemStatus::Done,
-                data: Some(data),
-                error: None,
-            },
-            Err(e) => types::ItemCallback {
-                repo: repo.repo,
-                status: types::ItemStatus::Error,
-                data: None,
-                error: Some(e.to_string()),
-            },
+            Ok(data) => {
+                info!(owner = %repo.user, repo = %repo_name, "background count task completed");
+                types::ItemCallback {
+                    repo: repo_name.clone(),
+                    status: types::ItemStatus::Done,
+                    data: Some(data),
+                    error: None,
+                }
+            }
+            Err(e) => {
+                error!(owner = %repo.user, repo = %repo_name, error = %e, "background count task failed");
+                types::ItemCallback {
+                    repo: repo_name.clone(),
+                    status: types::ItemStatus::Error,
+                    data: None,
+                    error: Some(e.to_string()),
+                }
+            }
         };
-        state
+        let send_result = state
             .client
             .post(&repo.callback)
             .header("User-Agent", "Matthew")
             .json(&callback)
             .send()
             .await
-            .unwrap();
+            .map(|_| ());
+
+        if let Err(e) = send_result {
+            error!(owner = %repo.user, repo = %repo_name, callback = %repo.callback, error = %e, "failed to send callback");
+        } else {
+            info!(owner = %repo.user, repo = %repo_name, callback = %repo.callback, "callback sent");
+        }
     });
     Ok(Output { success: true })
 }
