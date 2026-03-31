@@ -8,11 +8,12 @@ use std::{
 use tokio::process::Command;
 use tracing::{debug, error, info, instrument};
 
-#[instrument(skip(client))]
+#[instrument(skip(client, token))]
 pub async fn count(
     data_dir: PathBuf,
     repo: crate::types::Repo,
     client: Arc<reqwest::Client>,
+    token: Option<String>,
 ) -> anyhow::Result<ItemData> {
     // 0. check data_dir
     info!(owner = %repo.owner, repo = %repo.repo, data_dir = %data_dir.display(), "count started");
@@ -27,14 +28,16 @@ pub async fn count(
         size: u64,
     }
 
-    let repo_info = client
+    let mut req = client
         .get(query_url)
         .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "ferris-love-matthew")
-        .send()
-        .await?
-        .json::<GithubApiResponse>()
-        .await?;
+        .header("User-Agent", "ferris-love-matthew");
+
+    if let Some(ref tok) = token {
+        req = req.header("Authorization", format!("Bearer {}", tok));
+    }
+
+    let repo_info = req.send().await?.json::<GithubApiResponse>().await?;
 
     info!(size = repo_info.size, "fetched repo size");
     if repo_info.size > 50 * 1024 {
@@ -50,8 +53,18 @@ pub async fn count(
     }
 
     let repo_url = format!("https://github.com/{}/{}.git", repo.owner, repo.repo);
-    info!(url = %repo_url, path = %repo_path.display(), "starting git clone");
-    let output = Command::new("git")
+    let log_url = repo_url.clone();
+    info!(url = %log_url, path = %repo_path.display(), authenticated = token.is_some(), "starting git clone");
+
+    let mut cmd = Command::new("git");
+    if let Some(ref tok) = token {
+        cmd.arg("-c")
+            .arg(format!(
+                "http.extraHeader=Authorization: Bearer {}",
+                tok
+            ));
+    }
+    let output = cmd
         .arg("clone")
         .arg("--depth=1")
         .arg(&repo_url)

@@ -6,11 +6,13 @@ This file describes the API that Matthew serves.
 
 ```http
 POST /api/count
-Authorication: Bearer [TOKEN]
+Authorization: Bearer [TOKEN]
 
 {
-  "repo":"user/repo",
-  "callback":"https://ferris.love/api/countCallback?repo=user%2Frepo&token=xxxxxxx"
+  "repo":"repo-name",
+  "user":"owner-name",
+  "callback":"https://ferris.love/api/callback/matthew?repo=owner%2Frepo",
+  "token":"ghs_xxxxxxxxxxxx"  // Optional: GitHub Installation Access Token for private repos
 }
 ```
 

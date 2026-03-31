@@ -76,6 +76,7 @@ async fn handle_request(
                     repo: repo.repo,
                 },
                 state.client.clone(),
+                repo.token.clone(),
             )
             .await
         };
