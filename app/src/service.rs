@@ -52,22 +52,17 @@ pub async fn count(
         tokio::fs::remove_dir_all(&repo_path).await?;
     }
 
-    let repo_url = format!("https://github.com/{}/{}.git", repo.owner, repo.repo);
-    let log_url = repo_url.clone();
+    let log_url = format!("https://github.com/{}/{}.git", repo.owner, repo.repo);
     info!(url = %log_url, path = %repo_path.display(), authenticated = token.is_some(), "starting git clone");
 
-    let mut cmd = Command::new("git");
-    if let Some(ref tok) = token {
-        cmd.arg("-c")
-            .arg(format!(
-                "http.extraHeader=Authorization: Bearer {}",
-                tok
-            ));
-    }
-    let output = cmd
+    let clone_url = match token {
+        Some(ref tok) => format!("https://x-access-token:{}@github.com/{}/{}.git", tok, repo.owner, repo.repo),
+        None => log_url.clone(),
+    };
+    let output = Command::new("git")
         .arg("clone")
         .arg("--depth=1")
-        .arg(&repo_url)
+        .arg(&clone_url)
         .arg(&repo_path)
         .output()
         .await?;
