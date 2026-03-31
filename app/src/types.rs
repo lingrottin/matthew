@@ -42,6 +42,7 @@ pub struct InvokeApiInput {
     pub repo: String,
     pub user: String,
     pub callback: String,
+    pub token: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
