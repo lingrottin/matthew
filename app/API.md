@@ -34,6 +34,11 @@ if Token is invalid.
 
 ### Callback
 
+Matthew will POST to the callback URL with the following headers:
+- `User-Agent: Matthew`
+- `Content-Type: application/json`
+- `X-Signature-256: sha256=<hex-encoded HMAC-SHA256 of body using callback_secret>`
+
 ```http
 POST [callback-url]
 
