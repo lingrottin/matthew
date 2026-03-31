@@ -3,6 +3,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::Semaphore;
+use tracing::{info, warn};
 
 use crate::types::{Output, Repo};
 mod service;
@@ -10,12 +11,15 @@ mod types;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     let config_toml = std::fs::read_to_string("Config.toml").expect("Failed to read Config.toml");
     let config: toml::Value = toml::from_str(&config_toml).expect("Failed to parse Config.toml");
     let mut port: i64 = 3000;
     if let Some(port_i) = config.get("port").and_then(|v| v.as_integer()) {
         port = port_i;
     }
+    info!(port, "loaded configuration");
     let token = if let Some(token) = config.get("token").and_then(|v| v.as_str()) {
         token.to_string()
     } else {
@@ -37,9 +41,9 @@ async fn main() {
         .route("/api/count", post(handle_request))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port))
-        .await
-        .unwrap();
+    let addr = format!("127.0.0.1:{}", port);
+    info!(%addr, "starting server");
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -57,9 +61,11 @@ async fn handle_request(
     headers: HeaderMap,
     Json(repo): Json<types::InvokeApiInput>,
 ) -> types::Result<types::Output> {
+    info!(user = %repo.user, repo = %repo.repo, "received count request");
     if headers.get("Authorization").and_then(|v| v.to_str().ok())
         != Some(&format!("Bearer {}", state.token))
     {
+        warn!(user = %repo.user, repo = %repo.repo, "unauthorized request rejected");
         return Ok(types::Output { success: false });
     }
     let state_clone = state.clone();
