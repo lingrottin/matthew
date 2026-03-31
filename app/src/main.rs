@@ -94,7 +94,7 @@ async fn handle_request(
                 error: Some(e.to_string()),
             },
         };
-        let body_json = serde_json::to_string(&callback).unwrap();
+        let body_json = serde_json::to_string(&callback)?;
         let signature = hmac_sign(&state.callback_secret, &body_json);
         state
             .client
@@ -104,8 +104,8 @@ async fn handle_request(
             .header("X-Signature-256", format!("sha256={}", signature))
             .body(body_json)
             .send()
-            .await
-            .unwrap();
+            .await?;
+        anyhow::Ok(())
     });
     Ok(Output { success: true })
 }
