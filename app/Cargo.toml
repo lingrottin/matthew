@@ -6,9 +6,9 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 async-compat = "0.2.5"
-axum = "0.8.6"
+axum = { version = "0.8.6", features = ["tracing"] }
 matthew = { path = "../lib", features = ["serde"] }
-reqwest = { version = "0.12.24", features = ["json"] }
+reqwest = { version = "0.12.24", features = ["json", "native-tls-vendored"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tokio = { version = "1.47.1", features = ["full"] }

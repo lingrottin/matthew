@@ -23,7 +23,7 @@ pub async fn count(
     // 1. Filter repo size
     let query_url = format!("https://api.github.com/repos/{}/{}", repo.owner, repo.repo);
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Debug)]
     struct GithubApiResponse {
         size: u64,
     }
@@ -38,7 +38,7 @@ pub async fn count(
     }
 
     let repo_info = req.send().await?.json::<GithubApiResponse>().await?;
-
+    debug!("{:?}", repo_info);
     info!(size = repo_info.size, "fetched repo size");
     if repo_info.size > 1024 * 1024 {
         error!(size = repo_info.size, "repository too large");
