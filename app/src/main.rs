@@ -9,8 +9,19 @@ use crate::types::{Output, Repo};
 mod service;
 mod types;
 
-#[tokio::main]
-async fn main() {
+const TOKIO_WORKER_STACK_SIZE: usize = 32 * 1024 * 1024;
+
+fn main() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(TOKIO_WORKER_STACK_SIZE)
+        .build()
+        .expect("failed to build tokio runtime");
+
+    runtime.block_on(async_main());
+}
+
+async fn async_main() {
     tracing_subscriber::fmt::init();
 
     let config_toml = std::fs::read_to_string("Config.toml").expect("Failed to read Config.toml");
@@ -118,8 +129,8 @@ async fn handle_request(
 }
 
 fn hmac_sign(secret: &str, body: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .expect("HMAC can take key of any size");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(body.as_bytes());
     let result = mac.finalize();
     hex::encode(result.into_bytes())

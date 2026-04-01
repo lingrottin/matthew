@@ -40,7 +40,7 @@ pub async fn count(
     let repo_info = req.send().await?.json::<GithubApiResponse>().await?;
 
     info!(size = repo_info.size, "fetched repo size");
-    if repo_info.size > 50 * 1024 {
+    if repo_info.size > 1024 * 1024 {
         error!(size = repo_info.size, "repository too large");
         return Err(anyhow!("Repository too large"));
     }
@@ -56,7 +56,10 @@ pub async fn count(
     info!(url = %log_url, path = %repo_path.display(), authenticated = token.is_some(), "starting git clone");
 
     let clone_url = match token {
-        Some(ref tok) => format!("https://x-access-token:{}@github.com/{}/{}.git", tok, repo.owner, repo.repo),
+        Some(ref tok) => format!(
+            "https://x-access-token:{}@github.com/{}/{}.git",
+            tok, repo.owner, repo.repo
+        ),
         None => log_url.clone(),
     };
     let output = Command::new("git")
@@ -73,7 +76,7 @@ pub async fn count(
         return Err(anyhow!("git clone failed: {}", stderr));
     }
 
-    // 3. Walk repo directory recursively and count .rs files
+    // 3. Walk repo directory iteratively and count .rs files
     #[derive(Default)]
     struct WalkStats {
         lorc: u64,
@@ -86,22 +89,32 @@ pub async fn count(
         }
     }
 
-    fn visit_dir(dir: &Path, stats: &mut WalkStats) {
-        let read = match std::fs::read_dir(dir) {
-            Ok(r) => r,
-            Err(e) => {
-                debug!(path = %dir.display(), %e, "failed to read dir");
-                return;
-            }
-        };
-        for entry in read.filter_map(Result::ok) {
-            let path = entry.path();
-            match entry.metadata() {
-                Ok(meta) => {
-                    if meta.is_dir() {
-                        visit_dir(&path, stats);
-                    } else if meta.is_file() {
-                        if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+    fn visit_dir(root: &Path, stats: &mut WalkStats) {
+        let mut pending = vec![root.to_path_buf()];
+
+        while let Some(dir) = pending.pop() {
+            let read = match std::fs::read_dir(&dir) {
+                Ok(r) => r,
+                Err(e) => {
+                    debug!(path = %dir.display(), %e, "failed to read dir");
+                    continue;
+                }
+            };
+
+            for entry in read.filter_map(Result::ok) {
+                let path = entry.path();
+                match entry.file_type() {
+                    Ok(file_type) => {
+                        if file_type.is_symlink() {
+                            debug!(path = %path.display(), "skipping symlink");
+                            continue;
+                        }
+
+                        if file_type.is_dir() {
+                            pending.push(path);
+                        } else if file_type.is_file()
+                            && path.extension().and_then(|s| s.to_str()) == Some("rs")
+                        {
                             match std::fs::read_to_string(&path) {
                                 Ok(content) => match matthew::count_str(content.clone()) {
                                     Ok(counts) => {
@@ -122,15 +135,15 @@ pub async fn count(
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    debug!(path = %path.display(), %e, "failed to stat entry");
+                    Err(e) => {
+                        debug!(path = %path.display(), %e, "failed to stat entry");
+                    }
                 }
             }
         }
     }
 
-    let mut stats = WalkStats::default();
+    let mut stats = Box::new(WalkStats::default());
     visit_dir(&repo_path, &mut stats);
 
     let _ = tokio::fs::remove_dir_all(&repo_path).await;
