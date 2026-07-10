@@ -14,6 +14,7 @@ pub async fn count(
     repo: crate::types::Repo,
     client: Arc<reqwest::Client>,
     token: Option<String>,
+    max_repo_size_kb: u64,
 ) -> anyhow::Result<ItemData> {
     // 0. check data_dir
     info!(owner = %repo.owner, repo = %repo.repo, data_dir = %data_dir.display(), "count started");
@@ -39,8 +40,8 @@ pub async fn count(
 
     let repo_info = req.send().await?.json::<GithubApiResponse>().await?;
     debug!("{:?}", repo_info);
-    info!(size = repo_info.size, "fetched repo size");
-    if repo_info.size > 1024 * 1024 {
+    info!(size = repo_info.size, max_repo_size_kb, "fetched repo size");
+    if repo_info.size > max_repo_size_kb {
         error!(size = repo_info.size, "repository too large");
         return Err(anyhow!("Repository too large"));
     }
