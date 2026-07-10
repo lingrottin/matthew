@@ -11,17 +11,6 @@ mod types;
 
 const TOKIO_WORKER_STACK_SIZE: usize = 32 * 1024 * 1024;
 
-fn env_or_config(key: &str) -> Option<String> {
-    std::env::var(key).ok()
-}
-
-async fn maybe_read_config() -> Option<toml::Value> {
-    tokio::fs::read_to_string("Config.toml")
-        .await
-        .ok()
-        .and_then(|s| toml::from_str(&s).ok())
-}
-
 fn main() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -35,42 +24,35 @@ fn main() {
 async fn async_main() {
     tracing_subscriber::fmt::init();
 
-    let config = maybe_read_config().await;
-
-    // Helper: get string from env > Config.toml
-    let cfg_str = |key: &str, env: &str| -> Option<String> {
-        env_or_config(env)
-            .or_else(|| config.as_ref().and_then(|c| c.get(key).and_then(|v| v.as_str()).map(String::from)))
+    let config_toml = std::fs::read_to_string("Config.toml").expect("Failed to read Config.toml");
+    let config: toml::Value = toml::from_str(&config_toml).expect("Failed to parse Config.toml");
+    let mut port: i64 = 3000;
+    if let Some(port_i) = config.get("port").and_then(|v| v.as_integer()) {
+        port = port_i;
+    }
+    info!(port, "loaded configuration");
+    let token = if let Some(token) = config.get("token").and_then(|v| v.as_str()) {
+        token.to_string()
+    } else {
+        panic!("token not found in Config.toml");
     };
-
-    // Helper: get integer from env > Config.toml > default
-    let cfg_int = |key: &str, env: &str, default: u64| -> u64 {
-        env_or_config(env)
-            .and_then(|v| v.parse().ok())
-            .or_else(|| config.as_ref().and_then(|c| c.get(key).and_then(|v| v.as_integer()).map(|v| v as u64)))
-            .unwrap_or(default)
+    let callback_secret = if let Some(s) = config.get("callback_secret").and_then(|v| v.as_str()) {
+        s.to_string()
+    } else {
+        panic!("callback_secret not found in Config.toml");
     };
-
-    let port: u16 = cfg_int("port", "MATTHEW_PORT", 3000) as u16;
-    let token = cfg_str("token", "MATTHEW_TOKEN").unwrap_or_default();
-    let callback_secret = cfg_str("callback_secret", "MATTHEW_CALLBACK_SECRET").unwrap_or_default();
-    let max_repo_size_kb = cfg_int("max_repo_size_kb", "MATTHEW_MAX_REPO_SIZE_KB", 4 * 1024 * 1024);
-
-    info!(port, token_configured = !token.is_empty(), callback_secret_configured = !callback_secret.is_empty(), max_repo_size_kb, "configuration loaded");
-
     let state = AppState {
         sem: Arc::new(Semaphore::new(4)), // limit to 4 concurrent tasks
         data_dir: PathBuf::from("./data"),
         client: Arc::new(reqwest::Client::new()),
         token,
         callback_secret,
-        max_repo_size_kb,
     };
     let app: Router = Router::new()
         .route("/api/count", post(handle_request))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("127.0.0.1:{}", port);
     info!(%addr, "starting server");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
@@ -83,7 +65,6 @@ pub struct AppState {
     client: Arc<reqwest::Client>,
     token: String,
     callback_secret: String,
-    max_repo_size_kb: u64,
 }
 
 async fn handle_request(
@@ -92,9 +73,8 @@ async fn handle_request(
     Json(repo): Json<types::InvokeApiInput>,
 ) -> types::Result<types::Output> {
     info!(user = %repo.user, repo = %repo.repo, "received count request");
-    if !state.token.is_empty()
-        && headers.get("Authorization").and_then(|v| v.to_str().ok())
-            != Some(&format!("Bearer {}", state.token))
+    if headers.get("Authorization").and_then(|v| v.to_str().ok())
+        != Some(&format!("Bearer {}", state.token))
     {
         warn!(user = %repo.user, repo = %repo.repo, "unauthorized request rejected");
         return Ok(types::Output { success: false });
@@ -114,7 +94,6 @@ async fn handle_request(
                 },
                 state.client.clone(),
                 repo.token.clone(),
-                state.max_repo_size_kb,
             )
             .await
         };
