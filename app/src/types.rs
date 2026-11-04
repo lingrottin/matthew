@@ -1,81 +1,44 @@
-use axum::response::IntoResponse;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-pub enum ErrorType {
-    Matthew((u16, String)),
-    Other(anyhow::Error),
-}
-impl Into<ErrorType> for anyhow::Error {
-    fn into(self) -> ErrorType {
-        ErrorType::Other(self)
-    }
-}
-pub struct ApiError {
-    err: ErrorType,
-}
-
-impl axum::response::IntoResponse for ApiError {
-    fn into_response(self) -> axum::response::Response {
-        match self.err {
-            ErrorType::Other(e) => {
-                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-                    .into_response();
-            }
-            ErrorType::Matthew(e) => {
-                return (axum::http::StatusCode::from_u16(e.0).unwrap(), e.1).into_response();
-            }
-        }
-    }
-}
-
-pub type Result<T> = std::result::Result<T, ApiError>;
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Repo {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Input {
+    pub job_id: String,
     pub owner: String,
     pub repo: String,
-}
-
-#[derive(Deserialize, Clone, Debug)]
-pub struct InvokeApiInput {
-    pub repo: String,
-    pub user: String,
-    pub callback: String,
+    pub commit_sha: String,
     pub token: Option<String>,
 }
 
-#[derive(Serialize, Clone, Debug)]
-pub struct Output {
-    pub success: bool,
-}
-impl IntoResponse for Output {
-    fn into_response(self) -> axum::response::Response {
-        let status = if self.success {
-            axum::http::StatusCode::OK
-        } else {
-            axum::http::StatusCode::UNAUTHORIZED
-        };
-        (status, serde_json::to_string(&self).unwrap()).into_response()
-    }
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub enum ItemStatus {
-    Done,
-    Error,
-}
-
-#[derive(Serialize, Clone, Debug, Default)]
-pub struct ItemData {
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Data {
     pub lorc: u64,
     pub counts: matthew::Counts,
+    pub parsed_files: u64,
+    pub skipped_files: u64,
+    pub snapshot_bytes: u64,
 }
 
-#[derive(Serialize, Clone, Debug)]
-pub struct ItemCallback {
-    pub repo: String,
-    pub status: ItemStatus,
-    pub data: Option<ItemData>,
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Output {
+    pub version: u8,
+    pub job_id: String,
+    pub commit_sha: String,
+    pub data: Option<Data>,
     pub error: Option<String>,
+    pub retryable: bool,
+}
+
+#[derive(Debug)]
+pub struct Permanent(pub String);
+impl std::fmt::Display for Permanent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for Permanent {}
+pub fn reject(message: impl Into<String>) -> anyhow::Error {
+    Permanent(message.into()).into()
 }
